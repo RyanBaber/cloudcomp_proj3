@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            color: #4CAF50;
+        }
+        .container {
+            margin: 20px;
+        }
+        input, button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .output-box {
+            background-color: #f9f9f9;
+            padding: 10px;
+            border: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Submit Attendance</h1>
+        <label for="name">Name:</label>
+        <input type="text" id="name" placeholder="Enter your name">
+        
+        <label for="email">Email:</label>
+        <input type="email" id="email" placeholder="Enter your email">
+        
+        <label for="date">Date:</label>
+        <input type="date" id="date">
+        
+        <label for="image">Upload Your Image:</label>
+        <input type="file" id="image" accept="image/*">
+        
+        <button onclick="uploadImage()">Upload & Process</button>
+    </div>
+
+    <div id="results">
+        <div class="output-box">
+            <h3>Attendance Result:</h3>
+            <pre id="attendance-output">Waiting for results...</pre>
+        </div>
+    </div>
+
+    <script>
+        async function getUploadUrl(fileName) {
+            const requestBody = { "action": "upload", "fileName": fileName };
+
+            try {
+                const uploadUrlResponse = await fetch("https://ax6o0qp0g5.execute-api.us-east-2.amazonaws.com/dev/process-image", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const responseText = await uploadUrlResponse.text();
+                console.log("Raw Response:", responseText);
+
+                try {
+                    const responseJson = JSON.parse(responseText);
+                    const data = responseJson.body ? JSON.parse(responseJson.body) : responseJson;
+
+
+                    if (data && data.uploadUrl && data.s3Url) {
+                        console.log("Parsed Response:", data);
+                        return { uploadUrl: data.uploadUrl, s3Url: data.s3Url };
+                    } else {
+                        console.error("Invalid response format:", data);
+                        return null;
+                    }
+                } catch (e) {
+                    console.error("Error parsing JSON response:", e, responseText);
+                    return null;
+                }
+            } catch (error) {
+                console.error("Fetch error:", error);
+                return null;
+            }
+        }
+
+        async function uploadImage() {
+            const name = document.getElementById("name").value;
+            const email = document.getElementById("email").value;
+            const date = document.getElementById("date").value;
+            const imageFile = document.getElementById("image").files[0];
+
+            if (!name || !email || !date || !imageFile) {
+                alert("Please fill all fields and select an image.");
+                return;
+            }
+
+            // Generate a unique filename for S3
+            const fileName = `${name.replace(" ", "_")}_${Date.now()}.jpg`;
+
+            // Request a signed URL for upload
+            const { uploadUrl, s3Url } = await getUploadUrl(fileName);
+            if (!uploadUrl || !s3Url) {
+                console.error("Failed to retrieve upload URL or S3 URL.");
+                return;
+            }
+
+            // Upload the image to S3
+            try {
+                await fetch(uploadUrl, {
+                    method: "PUT",
+                    headers: { "Content-Type": "image/jpeg" },
+                    body: imageFile
+                });
+                console.log("File uploaded successfully");
+
+                // Start face/name detection
+                processImage(name, email, date, s3Url);
+            } catch (error) {
+                console.error("Error uploading file:", error);
+                document.getElementById("attendance-output").innerText = "Error uploading image. Please try again.";
+            }
+        }
+
+        async function processImage(name, email, date, imageUrl) {
+            document.getElementById("attendance-output").innerText = "Processing...";
+
+            const response = await fetch("https://ax6o0qp0g5.execute-api.us-east-2.amazonaws.com/dev/process-image", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "detect", name, email, date, s3_url: imageUrl })
+            });
+
+            const data = await response.json();
+
+            document.getElementById("attendance-output").innerText = 
+            `Attendance: ${data.participation ? "Present" : "Absent"}`;        
+        }
+    </script>
+
+</body>
+</html>
